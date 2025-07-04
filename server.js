@@ -132,7 +132,7 @@ app.post('/api/create-bot', async (req, res) => {
       : `ws://localhost:${process.env.PORT || 8080}/transcript`;
     
     // Create bot with Recall.ai
-    const recallResponse = await fetch('https://api.recall.ai/api/v1/bot/', {
+    const recallResponse = await fetch('https://us-west-2.recall.ai/api/v1/bot/', {
       method: 'POST',
       headers: {
         'Authorization': `Token ${process.env.RECALL_API_KEY}`,
@@ -231,7 +231,7 @@ app.post('/webhook', async (req, res) => {
         
         // Fetch complete transcript from Recall.ai
         try {
-          const transcriptResponse = await fetch(`https://api.recall.ai/api/v1/bot/${event.bot_id}/transcript/`, {
+          const transcriptResponse = await fetch(`https://us-west-2.recall.ai/api/v1/bot/${event.bot_id}/transcript/`, {
             headers: {
               'Authorization': `Token ${process.env.RECALL_API_KEY}`
             }
