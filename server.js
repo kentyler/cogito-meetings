@@ -19,7 +19,7 @@ app.use(express.json());
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', service: 'cogito-recall-bot' });
+  res.json({ status: 'healthy', service: 'cogito-recall-bot', version: '1.1' });
 });
 
 // WebSocket handler for real-time transcription
