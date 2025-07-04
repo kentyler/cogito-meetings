@@ -33,7 +33,8 @@ wss.on('connection', (ws, req) => {
       
       // Find the meeting by recall_bot_id
       const { data: meeting } = await supabase
-        .from('meetings.block_meetings')
+        .schema('meetings')
+        .from('block_meetings')
         .select('block_id')
         .eq('recall_bot_id', transcript.bot_id)
         .single();
@@ -93,7 +94,8 @@ wss.on('connection', (ws, req) => {
 async function getOrCreateAttendee(blockId, speakerName) {
   // Check if attendee already exists for this meeting
   const { data: attendee } = await supabase
-    .from('meetings.block_attendees')
+    .schema('meetings')
+    .from('block_attendees')
     .select('*')
     .eq('block_id', blockId)
     .eq('name', speakerName)
@@ -103,7 +105,8 @@ async function getOrCreateAttendee(blockId, speakerName) {
   
   // Create new attendee
   const { data: newAttendee } = await supabase
-    .from('meetings.block_attendees')
+    .schema('meetings')
+    .from('block_attendees')
     .insert({
       block_id: blockId,
       name: speakerName,
@@ -140,7 +143,7 @@ app.post('/api/create-bot', async (req, res) => {
       },
       body: JSON.stringify({
         meeting_url: meeting_url,
-        bot_name: 'Cogito Observer',
+        bot_name: 'Cogito',
         recording_config: {
           transcript: {
             provider: {
@@ -186,7 +189,8 @@ app.post('/api/create-bot', async (req, res) => {
     
     // Create meeting-specific data
     const { data: meeting, error: meetingError } = await supabase
-      .from('meetings.block_meetings')
+      .schema('meetings')
+      .from('block_meetings')
       .insert({
         block_id: block.block_id,
         recall_bot_id: botData.id,
@@ -253,7 +257,8 @@ app.post('/webhook', async (req, res) => {
       }
       
       await supabase
-        .from('meetings.block_meetings')
+        .schema('meetings')
+        .from('block_meetings')
         .update(updateData)
         .eq('recall_bot_id', event.bot_id);
     }
