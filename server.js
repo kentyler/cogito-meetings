@@ -141,9 +141,12 @@ app.post('/api/create-bot', async (req, res) => {
       body: JSON.stringify({
         meeting_url: meeting_url,
         bot_name: 'Cogito Observer',
-        transcription_options: {
-          provider: 'recall',
-          real_time: true
+        recording_config: {
+          transcript: {
+            provider: {
+              meeting_captions: {}
+            }
+          }
         },
         real_time_media: {
           websocket_transcription_url: websocketUrl
