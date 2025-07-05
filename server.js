@@ -3,6 +3,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Pool } = require('pg');
 const fetch = require('node-fetch');
+const crypto = require('crypto');
 
 const app = express();
 const server = require('http').createServer(app);
@@ -12,26 +13,6 @@ const wss = new WebSocketServer({ server });
 console.log('🔄 Using Supabase REST API for database operations');
 
 // Supabase REST API helper functions
-async function createBlockViaAPI(blockData) {
-  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/blocks`, {
-    method: 'POST',
-    headers: {
-      'apikey': process.env.SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
-    },
-    body: JSON.stringify(blockData)
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Supabase API error: ${response.status} ${await response.text()}`);
-  }
-  
-  const result = await response.json();
-  return result[0];
-}
-
 async function createMeetingViaAPI(meetingData) {
   const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/block_meetings`, {
     method: 'POST',
@@ -45,7 +26,8 @@ async function createMeetingViaAPI(meetingData) {
   });
   
   if (!response.ok) {
-    throw new Error(`Supabase API error: ${response.status} ${await response.text()}`);
+    const responseText = await response.text();
+    throw new Error(`Supabase API error: ${response.status} ${responseText}`);
   }
   
   const result = await response.json();
@@ -199,30 +181,24 @@ app.post('/api/create-bot', async (req, res) => {
     const botData = await recallResponse.json();
     console.log('Bot created:', botData);
     
-    // Create a block for this meeting using Supabase REST API
-    console.log('Creating block for meeting:', meeting_name);
+    // Generate a UUID for the meeting block
+    const blockId = crypto.randomUUID();
+    console.log('Creating meeting record for bot:', botData.id);
     
-    const block = await createBlockViaAPI({
-      name: meeting_name || `Meeting ${new Date().toISOString()}`,
-      description: `Meeting from ${meeting_url}`,
-      block_type: 'meeting',
-      metadata: { created_by: 'recall_bot' }
-    });
-    console.log('Block created:', block.block_id);
-    
-    // Create meeting-specific data
+    // Create meeting record directly
     const meeting = await createMeetingViaAPI({
-      block_id: block.block_id,
+      block_id: blockId,
       recall_bot_id: botData.id,
       meeting_url: meeting_url,
       invited_by_user_id: client_id,
       status: 'joining'
     });
+    console.log('Meeting record created:', meeting.block_id);
     
     res.json({
       bot: botData,
-      meeting_block: block,
-      meeting: meeting
+      meeting: meeting,
+      block_id: blockId
     });
     
   } catch (error) {
