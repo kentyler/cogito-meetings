@@ -26,10 +26,15 @@
 In Render dashboard, add these environment variables:
 
 ```
-SUPABASE_URL=https://hpdbaeurycyhqigiatco.supabase.co
-SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZGJhZXVyeWN5aHFpZ2lhdGNvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MDQ0Nzg1OCwiZXhwIjoyMDY2MDIzODU4fQ.3iXWyAYugbrkO5uIE0zfYXZJe4u7Y3nhqlZPl9fjRFM
-RECALL_API_KEY=9cd175818f68965427cfd5788009dc889ea84b81
+SUPABASE_URL=[Your Supabase project URL]
+SUPABASE_SERVICE_KEY=[Your Supabase service role key]
+RECALL_API_KEY=[Your Recall.ai API key]
 ```
+
+**Note**: Get these values from:
+- SUPABASE_URL: Your Supabase project settings
+- SUPABASE_SERVICE_KEY: Supabase dashboard → Settings → API → Service role key
+- RECALL_API_KEY: Your Recall.ai API dashboard
 
 ## Step 4: Create Database Tables
 1. Go to your Supabase dashboard: https://supabase.com/dashboard/project/hpdbaeurycyhqigiatco

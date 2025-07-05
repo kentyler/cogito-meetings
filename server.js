@@ -1,18 +1,31 @@
 require('dotenv').config();
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const { createClient } = require('@supabase/supabase-js');
+const { Pool } = require('pg');
 const fetch = require('node-fetch');
 
 const app = express();
 const server = require('http').createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Initialize PostgreSQL connection
+// Use DATABASE_URL if provided, otherwise construct from SUPABASE_URL
+const connectionString = process.env.DATABASE_URL || 
+  process.env.SUPABASE_URL?.replace('https://', 'postgresql://postgres:') + '.pooler.supabase.com:5432/postgres';
+
+const pool = new Pool({
+  connectionString: connectionString,
+  ssl: { rejectUnauthorized: false },
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  acquireTimeoutMillis: 10000,
+});
+
+// Set search path for schema access
+pool.on('connect', (client) => {
+  client.query('SET search_path = public, conversation, client_mgmt');
+});
 
 // Middleware
 app.use(express.json());
@@ -32,12 +45,11 @@ wss.on('connection', (ws, req) => {
       console.log('Received transcript:', transcript);
       
       // Find the meeting by recall_bot_id
-      const { data: meeting } = await supabase
-        .schema('meetings')
-        .from('block_meetings')
-        .select('block_id')
-        .eq('recall_bot_id', transcript.bot_id)
-        .single();
+      const meetingResult = await pool.query(
+        'SELECT block_id FROM block_meetings WHERE recall_bot_id = $1',
+        [transcript.bot_id]
+      );
+      const meeting = meetingResult.rows[0];
       
       if (!meeting) {
         console.error('No meeting found for bot:', transcript.bot_id);
@@ -48,31 +60,32 @@ wss.on('connection', (ws, req) => {
       const attendee = await getOrCreateAttendee(meeting.block_id, transcript.speaker);
       
       // Create a turn for this transcript
-      const { data: turn, error: turnError } = await supabase
-        .from('turns')
-        .insert({
-          participant_id: attendee.id, // Use attendee ID as participant
-          turn_text: transcript.text,
-          source_type: 'recall_bot',
-          turn_timestamp: transcript.timestamp || new Date().toISOString(),
-          client_id: 1 // TODO: Get from meeting context
-        })
-        .select()
-        .single();
+      const turnResult = await pool.query(
+        `INSERT INTO turns (participant_id, content, source_type, metadata) 
+         VALUES ($1, $2, $3, $4) RETURNING turn_id`,
+        [
+          attendee.id,
+          transcript.text,
+          'recall_bot',
+          { 
+            timestamp: transcript.timestamp || new Date().toISOString(),
+            bot_id: transcript.bot_id 
+          }
+        ]
+      );
+      const turn = turnResult.rows[0];
       
-      if (turnError) {
-        console.error('Error creating turn:', turnError);
-        return;
-      }
+      // Get next sequence order for this block
+      const sequenceResult = await pool.query(
+        'SELECT COALESCE(MAX(sequence_order), 0) + 1 as next_order FROM block_turns WHERE block_id = $1',
+        [meeting.block_id]
+      );
       
       // Link turn to the meeting block
-      await supabase
-        .from('block_turns')
-        .insert({
-          block_id: meeting.block_id,
-          turn_id: turn.turn_id,
-          sequence_order: transcript.sequence || 0
-        });
+      await pool.query(
+        'INSERT INTO block_turns (block_id, turn_id, sequence_order) VALUES ($1, $2, $3)',
+        [meeting.block_id, turn.turn_id, sequenceResult.rows[0].next_order]
+      );
       
       // TODO: Add pattern analysis here
       
@@ -93,29 +106,23 @@ wss.on('connection', (ws, req) => {
 // Helper function to get or create attendee
 async function getOrCreateAttendee(blockId, speakerName) {
   // Check if attendee already exists for this meeting
-  const { data: attendee } = await supabase
-    .schema('meetings')
-    .from('block_attendees')
-    .select('*')
-    .eq('block_id', blockId)
-    .eq('name', speakerName)
-    .single();
+  const attendeeResult = await pool.query(
+    'SELECT * FROM block_attendees WHERE block_id = $1 AND name = $2',
+    [blockId, speakerName]
+  );
   
-  if (attendee) return attendee;
+  if (attendeeResult.rows.length > 0) {
+    return attendeeResult.rows[0];
+  }
   
   // Create new attendee
-  const { data: newAttendee } = await supabase
-    .schema('meetings')
-    .from('block_attendees')
-    .insert({
-      block_id: blockId,
-      name: speakerName,
-      story: `${speakerName} joined the meeting.`
-    })
-    .select()
-    .single();
+  const newAttendeeResult = await pool.query(
+    `INSERT INTO block_attendees (block_id, name, story) 
+     VALUES ($1, $2, $3) RETURNING *`,
+    [blockId, speakerName, `${speakerName} joined the meeting.`]
+  );
   
-  return newAttendee;
+  return newAttendeeResult.rows[0];
 }
 
 // API endpoint to create a meeting bot
@@ -168,42 +175,25 @@ app.post('/api/create-bot', async (req, res) => {
     console.log('Bot created:', botData);
     
     // Create a block for this meeting
-    const { data: block, error: blockError } = await supabase
-      .from('blocks')
-      .insert({
-        name: meeting_name || `Meeting ${new Date().toISOString()}`,
-        description: `Meeting from ${meeting_url}`,
-        block_type: 'meeting',
-        created_by: 'recall_bot'
-      })
-      .select()
-      .single();
-    
-    if (blockError) {
-      console.error('Block creation error:', blockError);
-      return res.status(500).json({ error: 'Failed to create meeting block' });
-    }
+    const blockResult = await pool.query(
+      `INSERT INTO blocks (name, description, block_type, metadata) 
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [
+        meeting_name || `Meeting ${new Date().toISOString()}`,
+        `Meeting from ${meeting_url}`,
+        'meeting',
+        { created_by: 'recall_bot' }
+      ]
+    );
+    const block = blockResult.rows[0];
     
     // Create meeting-specific data
-    const { data: meeting, error: meetingError } = await supabase
-      .schema('meetings')
-      .from('block_meetings')
-      .insert({
-        block_id: block.block_id,
-        recall_bot_id: botData.id,
-        meeting_url: meeting_url,
-        invited_by_user_id: client_id, // TODO: Use actual user ID
-        status: 'joining'
-      })
-      .select()
-      .single();
-    
-    if (meetingError) {
-      console.error('Meeting creation error:', meetingError);
-      // Clean up block
-      await supabase.from('blocks').delete().eq('block_id', block.block_id);
-      return res.status(500).json({ error: 'Failed to create meeting record' });
-    }
+    const meetingResult = await pool.query(
+      `INSERT INTO block_meetings (block_id, recall_bot_id, meeting_url, invited_by_user_id, status) 
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [block.block_id, botData.id, meeting_url, client_id, 'joining']
+    );
+    const meeting = meetingResult.rows[0];
     
     res.json({
       bot: botData,
@@ -253,11 +243,13 @@ app.post('/webhook', async (req, res) => {
         }
       }
       
-      await supabase
-        .schema('meetings')
-        .from('block_meetings')
-        .update(updateData)
-        .eq('recall_bot_id', event.bot_id);
+      const updateFields = Object.keys(updateData).map((key, i) => `${key} = $${i + 2}`).join(', ');
+      const updateValues = [event.bot_id, ...Object.values(updateData)];
+      
+      await pool.query(
+        `UPDATE block_meetings SET ${updateFields} WHERE recall_bot_id = $1`,
+        updateValues
+      );
     }
     
     res.status(200).send('OK');
