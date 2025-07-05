@@ -9,9 +9,14 @@ const server = require('http').createServer(app);
 const wss = new WebSocketServer({ server });
 
 // Initialize PostgreSQL connection
-// Use DATABASE_URL if provided, otherwise construct from SUPABASE_URL
-const connectionString = process.env.DATABASE_URL || 
-  process.env.SUPABASE_URL?.replace('https://', 'postgresql://postgres:') + '.pooler.supabase.com:5432/postgres';
+// For Render deployment, use DATABASE_URL from environment variables
+// This should be set in Render dashboard as the full PostgreSQL connection string
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('❌ DATABASE_URL environment variable is required');
+  process.exit(1);
+}
 
 const pool = new Pool({
   connectionString: connectionString,
@@ -26,6 +31,16 @@ const pool = new Pool({
 pool.on('connect', (client) => {
   client.query('SET search_path = public, conversation, client_mgmt');
 });
+
+// Test database connection on startup
+pool.connect()
+  .then(client => {
+    console.log('✅ PostgreSQL connected successfully');
+    client.release();
+  })
+  .catch(err => {
+    console.error('❌ PostgreSQL connection failed:', err.message);
+  });
 
 // Middleware
 app.use(express.json());

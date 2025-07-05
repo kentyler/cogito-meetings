@@ -26,15 +26,15 @@
 In Render dashboard, add these environment variables:
 
 ```
-SUPABASE_URL=[Your Supabase project URL]
-SUPABASE_SERVICE_KEY=[Your Supabase service role key]
+DATABASE_URL=[Your PostgreSQL connection string]
 RECALL_API_KEY=[Your Recall.ai API key]
+RENDER_EXTERNAL_URL=[Your Render service URL without https://]
 ```
 
 **Note**: Get these values from:
-- SUPABASE_URL: Your Supabase project settings
-- SUPABASE_SERVICE_KEY: Supabase dashboard → Settings → API → Service role key
-- RECALL_API_KEY: Your Recall.ai API dashboard
+- DATABASE_URL: Construct from Supabase: `postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres`
+- RECALL_API_KEY: Your Recall.ai API dashboard  
+- RENDER_EXTERNAL_URL: Your Render service URL (e.g., `cogito-meetings.onrender.com`)
 
 ## Step 4: Create Database Tables
 1. Go to your Supabase dashboard: https://supabase.com/dashboard/project/hpdbaeurycyhqigiatco
