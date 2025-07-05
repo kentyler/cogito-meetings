@@ -151,9 +151,6 @@ app.post('/api/create-bot', async (req, res) => {
             }
           }
         },
-        real_time_media: {
-          websocket_transcription_url: websocketUrl
-        },
         webhook_url: `https://${process.env.RENDER_EXTERNAL_URL}/webhook`
       })
     });
