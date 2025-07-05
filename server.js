@@ -190,6 +190,7 @@ app.post('/api/create-bot', async (req, res) => {
     console.log('Bot created:', botData);
     
     // Create a block for this meeting
+    console.log('Creating block for meeting:', meeting_name);
     const blockResult = await pool.query(
       `INSERT INTO blocks (name, description, block_type, metadata) 
        VALUES ($1, $2, $3, $4) RETURNING *`,
@@ -201,6 +202,7 @@ app.post('/api/create-bot', async (req, res) => {
       ]
     );
     const block = blockResult.rows[0];
+    console.log('Block created:', block.block_id);
     
     // Create meeting-specific data
     const meetingResult = await pool.query(
@@ -217,8 +219,12 @@ app.post('/api/create-bot', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error creating bot:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error creating bot:', error.message);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      details: error.message 
+    });
   }
 });
 
