@@ -8,39 +8,89 @@ const app = express();
 const server = require('http').createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Initialize PostgreSQL connection
-// For Render deployment, use DATABASE_URL from environment variables
-// This should be set in Render dashboard as the full PostgreSQL connection string
+// Try PostgreSQL direct connection first, fallback to Supabase REST API
+let pool = null;
+let useDirectDB = false;
+
 const connectionString = process.env.DATABASE_URL;
 
-if (!connectionString) {
-  console.error('❌ DATABASE_URL environment variable is required');
-  process.exit(1);
+if (connectionString) {
+  try {
+    pool = new Pool({
+      connectionString: connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+      acquireTimeoutMillis: 5000,
+    });
+
+    // Set search path for schema access
+    pool.on('connect', (client) => {
+      client.query('SET search_path = public, conversation, client_mgmt');
+    });
+
+    // Test database connection
+    pool.connect()
+      .then(client => {
+        console.log('✅ PostgreSQL direct connection successful');
+        useDirectDB = true;
+        client.release();
+      })
+      .catch(err => {
+        console.error('❌ PostgreSQL direct connection failed:', err.message);
+        console.log('🔄 Will use Supabase REST API as fallback');
+        useDirectDB = false;
+      });
+  } catch (err) {
+    console.error('❌ Failed to initialize PostgreSQL pool:', err.message);
+    useDirectDB = false;
+  }
+} else {
+  console.log('🔄 No DATABASE_URL provided, using Supabase REST API');
+  useDirectDB = false;
 }
 
-const pool = new Pool({
-  connectionString: connectionString,
-  ssl: { rejectUnauthorized: false },
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-  acquireTimeoutMillis: 10000,
-});
-
-// Set search path for schema access
-pool.on('connect', (client) => {
-  client.query('SET search_path = public, conversation, client_mgmt');
-});
-
-// Test database connection on startup
-pool.connect()
-  .then(client => {
-    console.log('✅ PostgreSQL connected successfully');
-    client.release();
-  })
-  .catch(err => {
-    console.error('❌ PostgreSQL connection failed:', err.message);
+// Supabase REST API helper functions
+async function createBlockViaAPI(blockData) {
+  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/blocks`, {
+    method: 'POST',
+    headers: {
+      'apikey': process.env.SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(blockData)
   });
+  
+  if (!response.ok) {
+    throw new Error(`Supabase API error: ${response.status} ${await response.text()}`);
+  }
+  
+  const result = await response.json();
+  return result[0];
+}
+
+async function createMeetingViaAPI(meetingData) {
+  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/block_meetings`, {
+    method: 'POST',
+    headers: {
+      'apikey': process.env.SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(meetingData)
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Supabase API error: ${response.status} ${await response.text()}`);
+  }
+  
+  const result = await response.json();
+  return result[0];
+}
 
 // Middleware
 app.use(express.json());
@@ -191,26 +241,51 @@ app.post('/api/create-bot', async (req, res) => {
     
     // Create a block for this meeting
     console.log('Creating block for meeting:', meeting_name);
-    const blockResult = await pool.query(
-      `INSERT INTO blocks (name, description, block_type, metadata) 
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [
-        meeting_name || `Meeting ${new Date().toISOString()}`,
-        `Meeting from ${meeting_url}`,
-        'meeting',
-        { created_by: 'recall_bot' }
-      ]
-    );
-    const block = blockResult.rows[0];
+    console.log('Using direct DB:', useDirectDB);
+    
+    let block;
+    if (useDirectDB && pool) {
+      const blockResult = await pool.query(
+        `INSERT INTO blocks (name, description, block_type, metadata) 
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [
+          meeting_name || `Meeting ${new Date().toISOString()}`,
+          `Meeting from ${meeting_url}`,
+          'meeting',
+          { created_by: 'recall_bot' }
+        ]
+      );
+      block = blockResult.rows[0];
+    } else {
+      // Use Supabase REST API
+      block = await createBlockViaAPI({
+        name: meeting_name || `Meeting ${new Date().toISOString()}`,
+        description: `Meeting from ${meeting_url}`,
+        block_type: 'meeting',
+        metadata: { created_by: 'recall_bot' }
+      });
+    }
     console.log('Block created:', block.block_id);
     
     // Create meeting-specific data
-    const meetingResult = await pool.query(
-      `INSERT INTO block_meetings (block_id, recall_bot_id, meeting_url, invited_by_user_id, status) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [block.block_id, botData.id, meeting_url, client_id, 'joining']
-    );
-    const meeting = meetingResult.rows[0];
+    let meeting;
+    if (useDirectDB && pool) {
+      const meetingResult = await pool.query(
+        `INSERT INTO block_meetings (block_id, recall_bot_id, meeting_url, invited_by_user_id, status) 
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [block.block_id, botData.id, meeting_url, client_id, 'joining']
+      );
+      meeting = meetingResult.rows[0];
+    } else {
+      // Use Supabase REST API  
+      meeting = await createMeetingViaAPI({
+        block_id: block.block_id,
+        recall_bot_id: botData.id,
+        meeting_url: meeting_url,
+        invited_by_user_id: client_id,
+        status: 'joining'
+      });
+    }
     
     res.json({
       bot: botData,
