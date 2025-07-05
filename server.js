@@ -9,33 +9,38 @@ const app = express();
 const server = require('http').createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Use Supabase REST API for database operations
-console.log('🔄 Using Supabase REST API for database operations');
+// Initialize PostgreSQL connection to Render database
+console.log('🔄 Connecting to Render PostgreSQL database');
 
-// Supabase REST API helper functions
-async function createMeetingViaAPI(meetingData) {
-  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/block_meetings`, {
-    method: 'POST',
-    headers: {
-      'apikey': process.env.SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
-    },
-    body: JSON.stringify(meetingData)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+
+// Set search path for schema access
+pool.on('connect', (client) => {
+  client.query('SET search_path = public, conversation, client_mgmt');
+});
+
+// Test database connection on startup
+pool.connect()
+  .then(client => {
+    console.log('✅ PostgreSQL connected successfully');
+    client.release();
+  })
+  .catch(err => {
+    console.error('❌ PostgreSQL connection failed:', err.message);
   });
-  
-  if (!response.ok) {
-    const responseText = await response.text();
-    throw new Error(`Supabase API error: ${response.status} ${responseText}`);
-  }
-  
-  const result = await response.json();
-  return result[0];
-}
 
 // Middleware
 app.use(express.json());
+
+// Temporary migration endpoint (remove after migration)
+const { addMigrationEndpoint } = require('./migrate-endpoint');
+addMigrationEndpoint(app);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -181,24 +186,35 @@ app.post('/api/create-bot', async (req, res) => {
     const botData = await recallResponse.json();
     console.log('Bot created:', botData);
     
-    // Generate a UUID for the meeting block
-    const blockId = crypto.randomUUID();
-    console.log('Creating meeting record for bot:', botData.id);
+    console.log('Creating block and meeting record for bot:', botData.id);
     
-    // Create meeting record directly
-    const meeting = await createMeetingViaAPI({
-      block_id: blockId,
-      recall_bot_id: botData.id,
-      meeting_url: meeting_url,
-      invited_by_user_id: client_id,
-      status: 'joining'
-    });
+    // Create a block for this meeting
+    const blockResult = await pool.query(
+      `INSERT INTO blocks (name, description, block_type, metadata) 
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [
+        meeting_name || `Meeting ${new Date().toISOString()}`,
+        `Meeting from ${meeting_url}`,
+        'meeting',
+        { created_by: 'recall_bot', recall_bot_id: botData.id }
+      ]
+    );
+    const block = blockResult.rows[0];
+    console.log('Block created:', block.block_id);
+    
+    // Create meeting-specific data
+    const meetingResult = await pool.query(
+      `INSERT INTO block_meetings (block_id, recall_bot_id, meeting_url, invited_by_user_id, status) 
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [block.block_id, botData.id, meeting_url, client_id, 'joining']
+    );
+    const meeting = meetingResult.rows[0];
     console.log('Meeting record created:', meeting.block_id);
     
     res.json({
       bot: botData,
       meeting: meeting,
-      block_id: blockId
+      block: block
     });
     
   } catch (error) {
