@@ -26,13 +26,15 @@
 In Render dashboard, add these environment variables:
 
 ```
-DATABASE_URL=[Your PostgreSQL connection string]
+SUPABASE_URL=[Your Supabase project URL]
+SUPABASE_SERVICE_KEY=[Your Supabase service role key]
 RECALL_API_KEY=[Your Recall.ai API key]
 RENDER_EXTERNAL_URL=[Your Render service URL without https://]
 ```
 
 **Note**: Get these values from:
-- DATABASE_URL: Construct from Supabase: `postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres`
+- SUPABASE_URL: Your Supabase project settings (e.g., `https://hpdbaeurycyhqigiatco.supabase.co`)
+- SUPABASE_SERVICE_KEY: Supabase dashboard → Settings → API → Service role key (starts with `eyJ...`)
 - RECALL_API_KEY: Your Recall.ai API dashboard  
 - RENDER_EXTERNAL_URL: Your Render service URL (e.g., `cogito-meetings.onrender.com`)
 
